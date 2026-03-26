@@ -66,11 +66,10 @@ app.post('/admin/clear-thumbnails', async (_, res) => {
 });
 app.use((_, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err: Error, _req: any, res: any, _next: any) => { console.error('[Unhandled]', err); res.status(500).json({ error: 'Internal server error' }); });
-testConnection().then(() => {
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`🍚 Server running on:`);
-    console.log(`   - Local:   http://localhost:${PORT}`);
-    console.log(`   - Network: http://192.168.31.158:${PORT}`);
-    scheduleDailyDiscovery();
-  });
+app.listen(Number(PORT), '0.0.0.0', () => {
+  console.log(`🍚 Server running on port ${PORT}`);
+  // Test DB connection after startup (don't block server from starting)
+  testConnection()
+    .then(() => scheduleDailyDiscovery())
+    .catch(err => console.error('[DB] Connection failed on startup:', err.message));
 });
