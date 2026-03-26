@@ -3,6 +3,7 @@ import http from 'http';
 import { pool } from '../db/connection';
 import { uploadImageBuffer } from './storageService';
 import { generateThumbnailBuffer } from './thumbnailService';
+// Note: dishImageScraper (Playwright) intentionally not imported — not used in production
 
 const SPOON_KEY  = process.env.SPOONACULAR_API_KEY;
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
