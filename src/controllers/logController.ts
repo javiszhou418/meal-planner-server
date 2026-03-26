@@ -1,6 +1,63 @@
 import { Request, Response } from 'express';
-import { pool } from '../db/connection';
-export async function getLog(req: Request, res: Response) { const date=(req.query.date as string)??new Date().toISOString().split('T')[0]; try { const {rows}=await pool.query(`SELECT ml.id,ml.logged_at,ml.meal_type,ml.servings,ml.calories,ml.protein_g,ml.carbs_g,ml.fat_g,row_to_json(d.*) AS dish FROM meal_log ml JOIN dishes d ON d.id=ml.dish_id WHERE ml.logged_at=$1 ORDER BY ml.id`,[date]); return res.json({data:rows}); } catch(err) { return res.status(500).json({error:'Failed to fetch log'}); } }
-export async function getDailySummary(req: Request, res: Response) { const date=(req.query.date as string)??new Date().toISOString().split('T')[0]; try { const {rows}=await pool.query(`SELECT * FROM daily_nutrition WHERE logged_at=$1`,[date]); return res.json({data:rows[0]??{logged_at:date,total_calories:0,total_protein_g:0,total_carbs_g:0,total_fat_g:0,dishes_eaten:0}}); } catch(err) { return res.status(500).json({error:'Failed to fetch summary'}); } }
-export async function addLogEntry(req: Request, res: Response) { const {dish_id,meal_type,servings,calories,protein_g,carbs_g,fat_g}=req.body; if(!dish_id||!meal_type) return res.status(400).json({error:'dish_id and meal_type are required'}); try { const {rows}=await pool.query(`INSERT INTO meal_log (dish_id,meal_type,servings,calories,protein_g,carbs_g,fat_g) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[dish_id,meal_type,servings??1,calories,protein_g,carbs_g,fat_g]); return res.status(201).json({data:rows[0]}); } catch(err) { return res.status(500).json({error:'Failed to add log entry'}); } }
-export async function deleteLogEntry(req: Request, res: Response) { const id=parseInt(req.params.id,10); if(isNaN(id)) return res.status(400).json({error:'Invalid ID'}); try { const r=await pool.query(`DELETE FROM meal_log WHERE id=$1 RETURNING id`,[id]); if(!r.rowCount) return res.status(404).json({error:'Log entry not found'}); return res.json({data:{deleted:id}}); } catch(err) { return res.status(500).json({error:'Failed to delete'}); } }
+import { getSupabase } from '../db/supabaseClient';
+
+export async function getLog(req: Request, res: Response) {
+  const date = (req.query.date as string) ?? new Date().toISOString().split('T')[0];
+  try {
+    const { data, error } = await getSupabase()
+      .from('meal_log')
+      .select('id, logged_at, meal_type, servings, calories, protein_g, carbs_g, fat_g, dish:dishes(*)')
+      .eq('logged_at', date)
+      .order('id');
+    if (error) throw error;
+    return res.json({ data });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch log' });
+  }
+}
+
+export async function getDailySummary(req: Request, res: Response) {
+  const date = (req.query.date as string) ?? new Date().toISOString().split('T')[0];
+  try {
+    const { data } = await getSupabase()
+      .from('daily_nutrition')
+      .select('*')
+      .eq('logged_at', date)
+      .maybeSingle();
+    return res.json({ data: data ?? { logged_at: date, total_calories: 0, total_protein_g: 0, total_carbs_g: 0, total_fat_g: 0, dishes_eaten: 0 } });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to fetch summary' });
+  }
+}
+
+export async function addLogEntry(req: Request, res: Response) {
+  const { dish_id, meal_type, servings, calories, protein_g, carbs_g, fat_g } = req.body;
+  if (!dish_id || !meal_type) return res.status(400).json({ error: 'dish_id and meal_type are required' });
+  try {
+    const { data, error } = await getSupabase()
+      .from('meal_log')
+      .insert({ dish_id, meal_type, servings: servings ?? 1, calories, protein_g, carbs_g, fat_g })
+      .select()
+      .single();
+    if (error) throw error;
+    return res.status(201).json({ data });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to add log entry' });
+  }
+}
+
+export async function deleteLogEntry(req: Request, res: Response) {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const { error, count } = await getSupabase()
+      .from('meal_log')
+      .delete({ count: 'exact' })
+      .eq('id', id);
+    if (error) throw error;
+    if (!count) return res.status(404).json({ error: 'Log entry not found' });
+    return res.json({ data: { deleted: id } });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to delete' });
+  }
+}

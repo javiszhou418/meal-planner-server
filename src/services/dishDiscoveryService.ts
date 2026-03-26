@@ -1,5 +1,5 @@
 import https from 'https';
-import { pool } from '../db/connection';
+import { getSupabase } from '../db/supabaseClient';
 
 const SPOON_KEY = process.env.SPOONACULAR_API_KEY;
 
@@ -80,54 +80,44 @@ async function saveDish(dish: {
   ingredients: { name_en: string; name_zh: string; amount_g: number; note: string | null }[];
   steps: string[];
 }): Promise<void> {
-  const client = await pool.connect();
+  const sb = getSupabase();
   try {
     // Check duplicate
-    const exists = await client.query('SELECT id FROM dishes WHERE name_en = $1', [dish.name_en]);
-    if (exists.rows.length > 0) {
+    const { data: existing } = await sb.from('dishes').select('id').eq('name_en', dish.name_en).maybeSingle();
+    if (existing) {
       console.log(`[discovery] Skipping duplicate: ${dish.name_en}`);
       return;
     }
 
-    await client.query('BEGIN');
-    const res = await client.query(
-      `INSERT INTO dishes (name_en, name_zh, category, protein_src, description, calories, protein_g, carbs_g, fat_g)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [
-        dish.name_en,
-        dish.name_zh,
-        dish.category,
-        dish.protein_src,
-        dish.description,
-        dish.calories,
-        dish.protein_g,
-        dish.carbs_g,
-        dish.fat_g,
-      ]
-    );
-    const dishId = res.rows[0].id;
+    const { data: inserted, error: insertErr } = await sb.from('dishes').insert({
+      name_en: dish.name_en,
+      name_zh: dish.name_zh,
+      category: dish.category,
+      protein_src: dish.protein_src,
+      description: dish.description,
+      calories: dish.calories,
+      protein_g: dish.protein_g,
+      carbs_g: dish.carbs_g,
+      fat_g: dish.fat_g,
+    }).select('id').single();
+    if (insertErr) throw insertErr;
+    const dishId = inserted.id;
 
-    for (const ing of dish.ingredients) {
-      await client.query(
-        `INSERT INTO ingredients (dish_id, name_en, name_zh, amount_g, note) VALUES ($1,$2,$3,$4,$5)`,
-        [dishId, ing.name_en, ing.name_zh, ing.amount_g, ing.note]
+    if (dish.ingredients.length > 0) {
+      await sb.from('ingredients').insert(
+        dish.ingredients.map(ing => ({ dish_id: dishId, name_en: ing.name_en, name_zh: ing.name_zh, amount_g: ing.amount_g, note: ing.note }))
       );
     }
 
-    for (let i = 0; i < dish.steps.length; i++) {
-      await client.query(
-        `INSERT INTO cooking_steps (dish_id, step_no, instruction) VALUES ($1,$2,$3)`,
-        [dishId, i + 1, dish.steps[i]]
+    if (dish.steps.length > 0) {
+      await sb.from('cooking_steps').insert(
+        dish.steps.map((step, i) => ({ dish_id: dishId, step_no: i + 1, instruction: step }))
       );
     }
 
-    await client.query('COMMIT');
     console.log(`[discovery] Saved new dish: ${dish.name_en}`);
   } catch (err) {
-    await client.query('ROLLBACK');
     console.error(`[discovery] Failed to save dish "${dish.name_en}":`, err);
-  } finally {
-    client.release();
   }
 }
 

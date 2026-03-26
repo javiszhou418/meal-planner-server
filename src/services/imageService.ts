@@ -1,9 +1,8 @@
 import https from 'https';
 import http from 'http';
-import { pool } from '../db/connection';
+import { getSupabase } from '../db/supabaseClient';
 import { uploadImageBuffer } from './storageService';
 import { generateThumbnailBuffer } from './thumbnailService';
-// Note: dishImageScraper (Playwright) intentionally not imported — not used in production
 
 const SPOON_KEY  = process.env.SPOONACULAR_API_KEY;
 const PEXELS_KEY = process.env.PEXELS_API_KEY;
@@ -32,18 +31,15 @@ export async function resolveAndPersistImage(dishId: number, nameEn: string, nam
     console.warn(`[image] Thumbnail generation failed for dish ${dishId}:`, err);
   }
 
-  await pool.query(
-    `UPDATE dishes SET image_url = $1, thumbnail_url = $2 WHERE id = $3`,
-    [storageUrl, thumbUrl ?? storageUrl, dishId]
-  );
+  await getSupabase().from('dishes').update({ image_url: storageUrl, thumbnail_url: thumbUrl ?? storageUrl }).eq('id', dishId);
   console.log(`[image] ✅ "${nameEn}" → ${storageUrl}`);
   return storageUrl;
 }
 
 export async function regenerateAllImages(): Promise<void> {
-  const { rows } = await pool.query(`SELECT id, name_en, name_zh FROM dishes ORDER BY id`);
-  console.log(`[regen] Regenerating ${rows.length} dish images...`);
-  for (const dish of rows) {
+  const { data: rows } = await getSupabase().from('dishes').select('id, name_en, name_zh').order('id');
+  console.log(`[regen] Regenerating ${(rows ?? []).length} dish images...`);
+  for (const dish of (rows ?? [])) {
     try { await resolveAndPersistImage(dish.id, dish.name_en, dish.name_zh); }
     catch (err) { console.error(`[regen] ❌ ${dish.name_en}:`, err); }
     await new Promise(r => setTimeout(r, 500));
@@ -163,15 +159,15 @@ async function wanxiangImageUrl(nameEn: string, nameZh: string): Promise<string 
 }
 
 export async function regenerateAllWithDalle(): Promise<void> {
-  const { rows } = await pool.query(`SELECT id, name_en, name_zh FROM dishes ORDER BY id`);
-  console.log(`[wanxiang] Regenerating ${rows.length} dish images with Wanxiang...`);
-  for (const dish of rows) {
+  const { data: rows } = await getSupabase().from('dishes').select('id, name_en, name_zh').order('id');
+  console.log(`[wanxiang] Regenerating ${(rows ?? []).length} dish images with Wanxiang...`);
+  for (const dish of (rows ?? [])) {
     try {
       const url = await wanxiangImageUrl(dish.name_en, dish.name_zh);
       if (!url) { console.warn(`[wanxiang] No image generated for "${dish.name_en}"`); continue; }
       const buffer = await downloadToBuffer(url);
       const storageUrl = await uploadImageBuffer(buffer, `dish_${dish.id}.jpg`, 'dishes');
-      await pool.query(`UPDATE dishes SET image_url = $1 WHERE id = $2`, [storageUrl, dish.id]);
+      await getSupabase().from('dishes').update({ image_url: storageUrl }).eq('id', dish.id);
       console.log(`[wanxiang] ✅ ${dish.name_en} → ${storageUrl}`);
     } catch (err) { console.error(`[wanxiang] ❌ ${dish.name_en}:`, err); }
     await new Promise(r => setTimeout(r, 1500));
@@ -180,9 +176,9 @@ export async function regenerateAllWithDalle(): Promise<void> {
 }
 
 export async function backfillMissingImages(): Promise<void> {
-  const { rows } = await pool.query(`SELECT id, name_en, name_zh FROM dishes WHERE image_url IS NULL`);
-  console.log(`[backfill] ${rows.length} dishes need images`);
-  for (const dish of rows) {
+  const { data: rows } = await getSupabase().from('dishes').select('id, name_en, name_zh').is('image_url', null);
+  console.log(`[backfill] ${(rows ?? []).length} dishes need images`);
+  for (const dish of (rows ?? [])) {
     try { await resolveAndPersistImage(dish.id, dish.name_en, dish.name_zh); }
     catch (err) { console.error(`[backfill] ❌ dish ${dish.id}:`, err); }
     await new Promise(r => setTimeout(r, 1000));

@@ -4,7 +4,12 @@ import helmet from 'helmet';
 import path from 'path';
 import dotenv from 'dotenv';
 dotenv.config();
-import { testConnection } from './db/connection';
+import { getSupabase } from './db/supabaseClient';
+async function testConnection(): Promise<void> {
+  const { error } = await getSupabase().from('dishes').select('id').limit(1);
+  if (error) throw new Error(error.message);
+  console.log('✅ Supabase connected');
+}
 import mealRoutes from './routes/meals';
 import dishRoutes from './routes/dishes';
 import logRoutes  from './routes/log';

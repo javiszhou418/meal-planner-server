@@ -1,16 +1,6 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getSupabase } from '../db/supabaseClient';
 
-let _client: SupabaseClient | null = null;
-
-function getClient(): SupabaseClient {
-  if (!_client) {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_KEY;
-    if (!url || !key) throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set');
-    _client = createClient(url, key);
-  }
-  return _client;
-}
+function getClient() { return getSupabase(); }
 
 export async function uploadImageBuffer(
   buffer: Buffer,

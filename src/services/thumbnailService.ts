@@ -25,32 +25,20 @@ export async function generateThumbnailBuffer(
  * Used by the migration script and admin endpoint.
  */
 export async function pregenerateAllThumbnails(): Promise<void> {
-  const { pool } = await import('../db/connection');
+  const { getSupabase } = await import('../db/supabaseClient');
   const { uploadImageBuffer } = await import('./storageService');
   const https = await import('https');
   const http = await import('http');
 
-  const { rows } = await pool.query(`SELECT id, image_url FROM dishes WHERE image_url IS NOT NULL ORDER BY id`);
-  console.log(`[thumbnail] Pre-generating thumbnails for ${rows.length} dishes...`);
+  const { data: rows } = await getSupabase().from('dishes').select('id, image_url').not('image_url', 'is', null).order('id');
+  console.log(`[thumbnail] Pre-generating thumbnails for ${(rows ?? []).length} dishes...`);
 
-  for (const dish of rows) {
+  for (const dish of (rows ?? [])) {
     try {
-      let buffer: Buffer;
-
-      if (dish.image_url.startsWith('http')) {
-        // Download from Supabase Storage or external URL
-        buffer = await downloadToBuffer(dish.image_url, https.default, http.default);
-      } else {
-        // Legacy local path — read from disk
-        const { readFile } = await import('fs/promises');
-        const path = await import('path');
-        const localPath = path.resolve(__dirname, '../../../assets/dishes', `dish_${dish.id}.jpg`);
-        buffer = await readFile(localPath);
-      }
-
+      const buffer = await downloadToBuffer(dish.image_url, https.default, http.default);
       const thumbBuffer = await generateThumbnailBuffer(buffer, { width: 400, height: 400, quality: 80 });
       const thumbUrl = await uploadImageBuffer(thumbBuffer, `dish_${dish.id}.jpg`, 'thumbnails');
-      await pool.query(`UPDATE dishes SET thumbnail_url = $1 WHERE id = $2`, [thumbUrl, dish.id]);
+      await getSupabase().from('dishes').update({ thumbnail_url: thumbUrl }).eq('id', dish.id);
       console.log(`[thumbnail] ✅ dish ${dish.id}`);
     } catch (err) {
       console.error(`[thumbnail] ❌ dish ${dish.id}:`, err);
